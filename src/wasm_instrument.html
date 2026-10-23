@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>WASM gauge</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  #surface { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<canvas id="surface"></canvas>
+<script>
+(function () {
+  "use strict";
+  var session = Number("__SESSION__" || 0);
+  var canvas = document.getElementById("surface");
+  var ctx = canvas.getContext("2d");
+  var frame = new Image();
+  var pending = false;
+  var lastSerial = 0;
+
+  function refresh() {
+    if (pending) return;
+    pending = true;
+    var img = new Image();
+    img.onload = function () {
+      if (!canvas.width || !canvas.height) {
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+      }
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      pending = false;
+    };
+    img.onerror = function () { pending = false; };
+    img.src = "/surface/" + session + ".png?t=" + Date.now();
+  }
+
+  function resize() {
+    var rect = canvas.getBoundingClientRect();
+    if (rect.width && rect.height) {
+      canvas.width = Math.round(rect.width);
+      canvas.height = Math.round(rect.height);
+    }
+  }
+
+  canvas.addEventListener("mousedown", function (e) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) / rect.width;
+    var y = (e.clientY - rect.top) / rect.height;
+    var flag = e.button === 0 ? (1 << 29) : (e.button === 2 ? (1 << 31) : (1 << 30));
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", "/api?session=" + session + "&op=mouse&x=" + x + "&y=" + y + "&flags=" + flag, true);
+    xhr.send(null);
+  });
+  canvas.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+
+  window.addEventListener("resize", resize);
+  resize();
+  setInterval(refresh, 50);
+  refresh();
+})();
+</script>
+</body>
+</html>

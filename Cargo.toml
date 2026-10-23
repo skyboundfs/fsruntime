@@ -1,0 +1,29 @@
+[package]
+name = "msfsrunner"
+version = "0.1.0"
+edition = "2021"
+description = "Standalone runtime for MSFS 2020/2024 addon WASM modules and HTML instruments"
+license = "MIT"
+
+[[bin]]
+name = "msfsrunner"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+walkdir = "2"
+wasmtime = "50"
+wasmtime-wasi = "50"
+ratatui = { version = "0.30", default-features = false, features = ["crossterm", "crossterm_0_29"] }
+crossterm = "0.29"
+tao = "0.34"
+wry = "0.53"
+png = "0.18.1"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
