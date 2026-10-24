@@ -45,3 +45,60 @@ jobs:
             fsruntime-*.tar.gz
             fsruntime-*.tar.gz.sha256
           generate_release_notes: true
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Package
+        run: |
+          name="fsruntime-${GITHUB_REF_NAME}-aarch64-macos"
+          mkdir -p "dist/$name"
+          cp target/release/fsruntime README.md "dist/$name/"
+          tar -C dist -czf "$name.tar.gz" "$name"
+          shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            fsruntime-*.tar.gz
+            fsruntime-*.tar.gz.sha256
+          generate_release_notes: true
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Package
+        shell: bash
+        run: |
+          name="fsruntime-${GITHUB_REF_NAME}-x86_64-windows"
+          mkdir -p "dist/$name"
+          cp target/release/fsruntime.exe README.md "dist/$name/"
+          cd dist
+          7z a -tzip "../${name}.zip" "$name"
+          cd ..
+          sha256sum "${name}.zip" > "${name}.zip.sha256"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            fsruntime-*.zip
+            fsruntime-*.zip.sha256
+          generate_release_notes: true
