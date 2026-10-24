@@ -230,44 +230,15 @@ pub struct Package {
     pub aircraft: Vec<Aircraft>,
 }
 
-#[derive(Clone, Debug)]
-pub struct Community {
-    pub root: PathBuf,
-    pub packages: Vec<Package>,
-    pub issues: Vec<String>,
-}
-
-impl Community {
-    pub fn scan(root: &Path) -> Result<Self> {
-        let resolved = if root.is_dir() { root.to_path_buf() } else { sibling_ci(root)? };
-        let root = resolved.as_path();
-        let mut packages = Vec::new();
-        let mut issues = Vec::new();
-        if root.join("manifest.json").is_file() {
-            let pkg = Package::load(root)?;
-            return Ok(Community { root: root.to_path_buf(), packages: vec![pkg], issues });
-        }
-        let mut entries: Vec<PathBuf> = std::fs::read_dir(root)
-            .with_context(|| format!("read {}", root.display()))?
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.is_dir())
-            .collect();
-        entries.sort();
-        for dir in entries {
-            match Package::load(&dir) {
-                Ok(pkg) => packages.push(pkg),
-                Err(e) => issues.push(format!("{}: {e}", dir.display())),
-            }
-        }
-        Ok(Community { root: root.to_path_buf(), packages, issues })
-    }
-
-    pub fn package(&self, name: &str) -> Option<&Package> {
-        self.packages.iter().find(|p| p.name == name)
-    }
-}
-
 impl Package {
+    pub fn scan(path: &Path) -> Result<Self> {
+        let dir = if path.is_dir() { path.to_path_buf() } else { sibling_ci(path)? };
+        if !dir.join("manifest.json").is_file() {
+            return Err(anyhow!("{} has no manifest.json", dir.display()));
+        }
+        Self::load(&dir)
+    }
+
     pub fn load(dir: &Path) -> Result<Self> {
         let manifest_path = dir.join("manifest.json");
         let text = std::fs::read_to_string(&manifest_path)

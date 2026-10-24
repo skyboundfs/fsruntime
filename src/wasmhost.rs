@@ -27,7 +27,14 @@ pub struct GaugeCallbacks {
     pub update: Option<TypedFunc<(u64, f32), u32>>,
     pub draw: Option<TypedFunc<(u64, u32), u32>>,
     pub kill: Option<TypedFunc<u64, u32>>,
-    pub mouse: Option<TypedFunc<(u64, f32, f32, u32), ()>>,
+    pub mouse: Option<MouseHandler>,
+}
+
+/// MSFS modules export mouse entry points in two shapes: `<gauge>_mouse_callback`
+/// takes (x, y, flags) and `<gauge>_gauge_mouse_handler` takes the context first.
+pub enum MouseHandler {
+    Plain(TypedFunc<(f32, f32, u32), ()>),
+    Context(TypedFunc<(u64, f32, f32, u32), ()>),
 }
 
 struct CommBusHandler {
@@ -153,9 +160,15 @@ impl GaugeInstance {
     }
 
     pub fn mouse(&mut self, x: f32, y: f32, flags: u32) -> Result<()> {
-        let Some(handler) = self.callbacks.mouse.clone() else { return Ok(()) };
-        let ctx = self.store.data().render_ctx;
-        handler.call(&mut self.store, (ctx, x, y, flags)).map_err(|e| anyhow::anyhow!("mouse handler trapped: {e}"))
+        let Some(handler) = self.callbacks.mouse.as_ref() else { return Ok(()) };
+        match handler {
+            MouseHandler::Plain(f) => f.call(&mut self.store, (x, y, flags)),
+            MouseHandler::Context(f) => {
+                let ctx = self.store.data().render_ctx;
+                f.call(&mut self.store, (ctx, x, y, flags))
+            }
+        }
+        .map_err(|e| anyhow::anyhow!("mouse handler trapped: {e}"))
     }
 
     fn write_install_data(&mut self, w: u32, h: u32, params: &str) -> Result<u32> {
@@ -302,6 +315,10 @@ impl WasmHost {
         Ok(WasmHost { engine, config })
     }
 
+    pub fn set_data_dir(&mut self, dir: PathBuf) {
+        self.config.data_dir = Some(dir);
+    }
+
     pub fn describe(&self, path: &Path) -> Result<ModuleReport> {
         let bytes = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;
         let module = Module::new(&self.engine, &bytes)
@@ -395,6 +412,12 @@ impl WasmHost {
             data.guest_alloc = guest_alloc;
             data.guest_free = guest_free;
         }
+        // These modules are WASI reactors: nothing runs their ctors, and
+        // __wasilibc_populate_preopens lives there. Without this call every
+        // fopen("./data/...") fails and gauge fonts never load.
+        if let Ok(ctors) = instance.get_typed_func::<(), ()>(&mut store, "__wasm_call_ctors") {
+            ctors.call(&mut store, ()).map_err(|e| anyhow::anyhow!("__wasm_call_ctors trapped: {e}"))?;
+        }
         let callbacks = bind_callbacks(&mut store, &instance, label);
         Ok(GaugeInstance {
             store,
@@ -411,9 +434,63 @@ fn build_wasi(data_dir: Option<&Path>) -> wasmtime_wasi::p1::WasiP1Ctx {
     let mut builder = wasmtime_wasi::WasiCtxBuilder::new();
     builder.inherit_stdio();
     if let Some(dir) = data_dir {
-        let _ = builder.preopened_dir(dir, ".", wasmtime_wasi::filesystem::FsPerms::ReadOnly);
+        let _ = builder.preopened_dir(case_view(dir), ".", wasmtime_wasi::filesystem::FsPerms::ReadOnly);
     }
     builder.build_p1()
+}
+
+/// MSFS resolves package paths case-insensitively; WASI does not, and gauges
+/// ask for "./data/..." while packages ship "Data/". WASI also refuses
+/// symlinks, so build a temp view with a real lowercase copy of the Data
+/// directory (a few MB) and preopen that as ".".
+///
+/// shortcut: only the mixed-case "Data" directory is mirrored, since that is
+/// the only such path gauges open; widen this if other directories are read.
+fn case_view(dir: &Path) -> PathBuf {
+    static VIEWS: std::sync::OnceLock<std::sync::Mutex<HashMap<PathBuf, PathBuf>>> =
+        std::sync::OnceLock::new();
+    let views = VIEWS.get_or_init(Default::default);
+    if let Some(hit) = views.lock().ok().and_then(|m| m.get(dir).cloned()) {
+        return hit;
+    }
+    let data = std::fs::read_dir(dir).into_iter().flatten().flatten().find(|e| {
+        let name = e.file_name().to_string_lossy().to_string();
+        name.eq_ignore_ascii_case("data") && name != "data" && e.path().is_dir()
+    });
+    let Some(data) = data else { return dir.to_path_buf() };
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    dir.hash(&mut hasher);
+    let view = std::env::temp_dir().join(format!("msfsrunner-view-{:x}", hasher.finish()));
+    let _ = std::fs::remove_dir_all(&view);
+    if std::fs::create_dir_all(&view).is_err() {
+        return dir.to_path_buf();
+    }
+    let target = view.join("data");
+    let built = match std::fs::create_dir_all(&target) {
+        Ok(()) => {
+            copy_tree(&data.path(), &target);
+            view
+        }
+        Err(_) => dir.to_path_buf(),
+    };
+    if let Ok(mut m) = views.lock() {
+        m.insert(dir.to_path_buf(), built.clone());
+    }
+    built
+}
+
+fn copy_tree(src: &Path, dst: &Path) {
+    for entry in std::fs::read_dir(src).into_iter().flatten().flatten() {
+        let target = dst.join(entry.file_name());
+        if entry.path().is_dir() {
+            if std::fs::create_dir_all(&target).is_ok() {
+                copy_tree(&entry.path(), &target);
+            }
+        } else {
+            let _ = std::fs::copy(entry.path(), &target);
+        }
+    }
 }
 
 fn bind_callbacks(store: &mut Store<HostState>, instance: &Instance, label: &str) -> GaugeCallbacks {
@@ -430,12 +507,14 @@ fn bind_callbacks(store: &mut Store<HostState>, instance: &Instance, label: &str
         .get_typed_func::<u64, u32>(&mut *store, &format!("{label}_gauge_kill"))
         .ok();
     let mouse = instance
-        .get_typed_func::<(u64, f32, f32, u32), ()>(&mut *store, &format!("{label}_gauge_mouse_handler"))
+        .get_typed_func::<(f32, f32, u32), ()>(&mut *store, &format!("{label}_mouse_callback"))
         .ok()
+        .map(MouseHandler::Plain)
         .or_else(|| {
             instance
-                .get_typed_func::<(u64, f32, f32, u32), ()>(&mut *store, &format!("{label}_mouse_callback"))
+                .get_typed_func::<(u64, f32, f32, u32), ()>(&mut *store, &format!("{label}_gauge_mouse_handler"))
                 .ok()
+                .map(MouseHandler::Context)
         });
     GaugeCallbacks { init, update, draw, kill, mouse }
 }
@@ -763,14 +842,14 @@ fn dispatch(caller: &mut Caller<'_, HostState>, name: &str, params: &[Val], resu
             let h = i32_at(params, 3).max(1) as u32;
             let data_ptr = i32_at(params, 5);
             let bytes = if data_ptr > 0 {
-                Some(read_bytes(caller, data_ptr, (w * h * if kind == 0 { 1 } else { 4 }) as i32))
+                Some(read_bytes(caller, data_ptr, (w * h * if kind == 1 { 1 } else { 4 }) as i32))
             } else {
                 None
             };
             let id = caller
                 .data_mut()
                 .render
-                .create_texture(kind == 0, w, h, bytes.as_deref());
+                .create_texture(kind == 1, w, h, bytes.as_deref());
             set_i32(results, id);
         }
         "fsRenderDeleteTexture" => {

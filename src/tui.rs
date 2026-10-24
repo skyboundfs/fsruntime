@@ -1,4 +1,4 @@
-use crate::pkg::{Community, Gauge, GaugeKind, Package, Target};
+use crate::pkg::{Gauge, GaugeKind, Package, Target};
 use crate::gui::{GuiCommand, GuiSink};
 use crate::runtime::{Runtime, RuntimeRequest};
 use anyhow::Result;
@@ -15,7 +15,6 @@ use std::time::Duration;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
-    Packages,
     Aircraft,
     Gauges,
     Instances,
@@ -30,11 +29,10 @@ pub enum Tab {
 }
 
 pub struct App {
-    pub community: Option<Community>,
+    pub package: Option<Package>,
     pub root: PathBuf,
     pub focus: Focus,
     pub tab: Tab,
-    pub package_state: ListState,
     pub aircraft_state: ListState,
     pub gauge_state: ListState,
     pub instance_state: ListState,
@@ -53,8 +51,6 @@ pub enum InputMode {
 
 impl App {
     pub fn new(root: PathBuf) -> Self {
-        let mut package_state = ListState::default();
-        package_state.select(Some(0));
         let mut aircraft_state = ListState::default();
         aircraft_state.select(Some(0));
         let mut gauge_state = ListState::default();
@@ -62,11 +58,10 @@ impl App {
         let mut instance_state = ListState::default();
         instance_state.select(Some(0));
         App {
-            community: None,
+            package: None,
             root,
-            focus: Focus::Packages,
+            focus: Focus::Aircraft,
             tab: Tab::Browser,
-            package_state,
             aircraft_state,
             gauge_state,
             instance_state,
@@ -78,14 +73,8 @@ impl App {
         }
     }
 
-    fn selected_package(&self) -> Option<&Package> {
-        let community = self.community.as_ref()?;
-        let index = self.package_state.selected()?;
-        community.packages.get(index)
-    }
-
     fn selected_aircraft(&self) -> Option<&crate::pkg::Aircraft> {
-        let package = self.selected_package()?;
+        let package = self.package.as_ref()?;
         let index = self.aircraft_state.selected()?;
         package.aircraft.get(index)
     }
@@ -97,9 +86,7 @@ impl App {
     }
 
     fn clamp_selection(&mut self) {
-        let package_len = self.community.as_ref().map(|c| c.packages.len()).unwrap_or(0);
-        clamp(&mut self.package_state, package_len);
-        let aircraft_len = self.selected_package().map(|p| p.aircraft.len()).unwrap_or(0);
+        let aircraft_len = self.package.as_ref().map(|p| p.aircraft.len()).unwrap_or(0);
         clamp(&mut self.aircraft_state, aircraft_len);
         let gauge_len = self.selected_aircraft().map(|a| a.gauges().count()).unwrap_or(0);
         clamp(&mut self.gauge_state, gauge_len);
@@ -133,11 +120,11 @@ pub fn run(
     let mut app = App::new(root.clone());
     if !root.as_os_str().is_empty() {
         match runtime.scan(&root) {
-            Ok(_) => {
-                app.community = runtime.community.clone();
-                app.status = format!("scanned {}", root.display());
+            Ok(()) => {
+                app.package = runtime.package.clone();
+                app.status = format!("loaded {}", root.display());
             }
-            Err(e) => app.status = format!("scan failed: {e}"),
+            Err(e) => app.status = format!("load failed: {e}"),
         }
     }
 
@@ -162,14 +149,7 @@ fn auto_launch(
 ) {
     let plane = aircraft
         .map(str::to_string)
-        .or_else(|| {
-            app.community
-                .as_ref()?
-                .package(package)?
-                .aircraft
-                .first()
-                .map(|a| a.key.clone())
-        });
+        .or_else(|| app.package.as_ref()?.aircraft.first().map(|a| a.key.clone()));
     let Some(plane) = plane else {
         app.status = format!("no aircraft in package {package}");
         return;
@@ -266,12 +246,12 @@ fn handle_key(
         KeyCode::Char('r') => {
             let root = app.root.clone();
             match runtime.scan(&root) {
-                Ok(n) => {
-                    app.community = runtime.community.clone();
-                    app.status = format!("rescanned: {n} packages");
+                Ok(()) => {
+                    app.package = runtime.package.clone();
+                    app.status = format!("reloaded {}", root.display());
                     app.clamp_selection();
                 }
-                Err(e) => app.status = format!("rescan failed: {e}"),
+                Err(e) => app.status = format!("reload failed: {e}"),
             }
         }
         KeyCode::Char('o') => {
@@ -324,13 +304,13 @@ fn handle_input(
             KeyCode::Enter => {
                 let path = PathBuf::from(buffer);
                 match runtime.scan(&path) {
-                    Ok(n) => {
+                    Ok(()) => {
                         app.root = path;
-                        app.community = runtime.community.clone();
-                        app.status = format!("scanned {n} packages");
+                        app.package = runtime.package.clone();
+                        app.status = format!("loaded {}", app.root.display());
                         app.clamp_selection();
                     }
-                    Err(e) => app.status = format!("scan failed: {e}"),
+                    Err(e) => app.status = format!("load failed: {e}"),
                 }
             }
             KeyCode::Backspace => {
@@ -383,13 +363,11 @@ fn handle_input(
 
 fn move_selection(app: &mut App, delta: i32) {
     let len = match app.focus {
-        Focus::Packages => app.community.as_ref().map(|c| c.packages.len()).unwrap_or(0),
-        Focus::Aircraft => app.selected_package().map(|p| p.aircraft.len()).unwrap_or(0),
+        Focus::Aircraft => app.package.as_ref().map(|p| p.aircraft.len()).unwrap_or(0),
         Focus::Gauges => app.selected_aircraft().map(|a| a.gauges().count()).unwrap_or(0),
         Focus::Instances => 0,
     };
     let state = match app.focus {
-        Focus::Packages => &mut app.package_state,
         Focus::Aircraft => &mut app.aircraft_state,
         Focus::Gauges => &mut app.gauge_state,
         Focus::Instances => &mut app.instance_state,
@@ -404,17 +382,15 @@ fn move_selection(app: &mut App, delta: i32) {
 
 fn next_focus(app: &mut App) {
     app.focus = match app.focus {
-        Focus::Packages => Focus::Aircraft,
         Focus::Aircraft => Focus::Gauges,
         Focus::Gauges => Focus::Instances,
-        Focus::Instances => Focus::Packages,
+        Focus::Instances => Focus::Aircraft,
     };
 }
 
 fn prev_focus(app: &mut App) {
     app.focus = match app.focus {
-        Focus::Packages => Focus::Instances,
-        Focus::Aircraft => Focus::Packages,
+        Focus::Aircraft => Focus::Instances,
         Focus::Gauges => Focus::Aircraft,
         Focus::Instances => Focus::Gauges,
     };
@@ -425,8 +401,8 @@ fn launch(app: &mut App, runtime: &mut Runtime, gui: &GuiSink, _request_tx: &Sen
         app.status = "nothing selected to launch".to_string();
         return;
     };
-    let Some(package) = app.selected_package() else {
-        app.status = "no package selected".to_string();
+    let Some(package) = app.package.as_ref() else {
+        app.status = "no package loaded".to_string();
         return;
     };
     let package_name = package.name.clone();
@@ -512,37 +488,12 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
 fn draw_browser(frame: &mut Frame, area: Rect, app: &mut App) {
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(28), Constraint::Percentage(30), Constraint::Percentage(42)])
+        .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
         .split(area);
 
-    let packages: Vec<ListItem> = app
-        .community
-        .as_ref()
-        .map(|c| {
-            c.packages
-                .iter()
-                .map(|p| {
-                    let color = match p.classification.target {
-                        Target::Msfs2020 => Color::Green,
-                        Target::Msfs2024 => Color::Cyan,
-                        Target::Both => Color::Yellow,
-                        Target::Unknown => Color::Red,
-                    };
-                    ListItem::new(Line::from(vec![
-                        Span::styled(format!("{} ", p.name), Style::default().fg(Color::White)),
-                        Span::styled(p.classification.target.label().to_string(), Style::default().fg(color)),
-                    ]))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    let package_list = List::new(packages)
-        .block(block("Packages", app.focus == Focus::Packages))
-        .highlight_style(Style::default().bg(Color::DarkGray));
-    frame.render_stateful_widget(package_list, cols[0], &mut app.package_state);
-
     let aircraft: Vec<ListItem> = app
-        .selected_package()
+        .package
+        .as_ref()
         .map(|p| {
             p.aircraft
                 .iter()
@@ -561,7 +512,7 @@ fn draw_browser(frame: &mut Frame, area: Rect, app: &mut App) {
     let aircraft_list = List::new(aircraft)
         .block(block("Aircraft", app.focus == Focus::Aircraft))
         .highlight_style(Style::default().bg(Color::DarkGray));
-    frame.render_stateful_widget(aircraft_list, cols[1], &mut app.aircraft_state);
+    frame.render_stateful_widget(aircraft_list, cols[0], &mut app.aircraft_state);
 
     let gauges: Vec<ListItem> = app
         .selected_aircraft()
@@ -589,7 +540,7 @@ fn draw_browser(frame: &mut Frame, area: Rect, app: &mut App) {
     let gauge_list = List::new(gauges)
         .block(block("Instruments", app.focus == Focus::Gauges))
         .highlight_style(Style::default().bg(Color::DarkGray));
-    frame.render_stateful_widget(gauge_list, cols[2], &mut app.gauge_state);
+    frame.render_stateful_widget(gauge_list, cols[1], &mut app.gauge_state);
 }
 
 fn draw_runtime(frame: &mut Frame, area: Rect, app: &mut App, runtime: &Runtime) {

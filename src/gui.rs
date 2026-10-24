@@ -62,23 +62,18 @@ pub fn run(event_loop: tao::event_loop::EventLoop<GuiEvent>, sink: GuiSink) {
                 if let Some(id) = id {
                     windows.remove(&id);
                 }
-                if windows.is_empty() {
-                    *control_flow = ControlFlow::Exit;
-                }
             }
             Event::UserEvent(GuiEvent::Command(GuiCommand::CloseAll)) => {
                 windows.clear();
-                *control_flow = ControlFlow::Exit;
             }
             Event::UserEvent(GuiEvent::Command(GuiCommand::Quit)) => {
                 windows.clear();
                 *control_flow = ControlFlow::Exit;
             }
             Event::WindowEvent { window_id, event: WindowEvent::CloseRequested, .. } => {
+                // Closing the last instrument leaves the app running; the TUI
+                // stays alive and can spawn new windows.
                 windows.remove(&window_id);
-                if windows.is_empty() {
-                    *control_flow = ControlFlow::Exit;
-                }
             }
             _ => {}
         }

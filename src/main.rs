@@ -76,11 +76,10 @@ fn main() -> Result<()> {
 fn headless(root: PathBuf, launch: Option<(String, Option<String>)>) -> Result<()> {
     let (request_tx, request_rx) = mpsc::channel::<runtime::RuntimeRequest>();
     let mut runtime = runtime::Runtime::new()?;
-    let count = runtime.scan(&root)?;
-    println!("packages: {count}");
-    for package in runtime.community.as_ref().map(|c| c.packages.as_slice()).unwrap_or(&[]) {
+    runtime.scan(&root)?;
+    for package in runtime.package.iter() {
         println!(
-            "  {} target={} confidence={}",
+            "package {} target={} confidence={}",
             package.name,
             package.classification.target.label(),
             package.classification.confidence.label()

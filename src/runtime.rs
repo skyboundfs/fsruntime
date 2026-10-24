@@ -1,5 +1,5 @@
 use crate::bridge::Bridge;
-use crate::pkg::{Community, Gauge, GaugeKind, Target};
+use crate::pkg::{Gauge, GaugeKind, Package, Target};
 use crate::render::Surface;
 use crate::sim::SimState;
 use crate::wasmhost::{EngineConfig, GaugeInstance, HostEvent, ModuleReport, WasmHost};
@@ -73,7 +73,7 @@ pub struct ModuleEntry {
 pub struct Runtime {
     pub host: WasmHost,
     pub bridge: Bridge,
-    pub community: Option<Community>,
+    pub package: Option<Package>,
     pub sessions: HashMap<u64, InstrumentSession>,
     pub modules: Vec<ModuleEntry>,
     pub next_session: u64,
@@ -96,7 +96,7 @@ impl Runtime {
         Ok(Runtime {
             host,
             bridge,
-            community: None,
+            package: None,
             sessions: HashMap::new(),
             modules: Vec::new(),
             next_session: 1,
@@ -110,28 +110,23 @@ impl Runtime {
         })
     }
 
-    pub fn scan(&mut self, root: &std::path::Path) -> Result<usize> {
-        let community = Community::scan(root)?;
-        let count = community.packages.len();
-        self.log.push(format!("scanned {} packages in {}", count, root.display()));
-        for issue in &community.issues {
-            self.log.push(format!("scan issue: {issue}"));
-        }
-        self.community = Some(community);
+    pub fn scan(&mut self, path: &std::path::Path) -> Result<()> {
+        let package = Package::scan(path)?;
+        self.host.set_data_dir(package.dir.clone());
+        self.log.push(format!("loaded package {} from {}", package.name, package.dir.display()));
+        self.package = Some(package);
         self.index_modules();
-        Ok(count)
+        Ok(())
     }
 
     fn index_modules(&mut self) {
         self.modules.clear();
-        let Some(community) = &self.community else { return };
+        let Some(package) = &self.package else { return };
         let mut paths: Vec<PathBuf> = Vec::new();
-        for package in &community.packages {
-            for aircraft in &package.aircraft {
-                for module in &aircraft.wasm_modules {
-                    if !paths.contains(module) {
-                        paths.push(module.clone());
-                    }
+        for aircraft in &package.aircraft {
+            for module in &aircraft.wasm_modules {
+                if !paths.contains(module) {
+                    paths.push(module.clone());
                 }
             }
         }
@@ -158,10 +153,7 @@ impl Runtime {
         let context = self.next_context;
         self.next_context += 1;
 
-        let community = self.community.as_ref().ok_or_else(|| anyhow!("no community folder scanned"))?;
-        let pkg = community
-            .package(package)
-            .ok_or_else(|| anyhow!("unknown package {package}"))?;
+        let pkg = self.package.as_ref().ok_or_else(|| anyhow!("no package loaded"))?;
         let html_ui = crate::pkg::find_dir_ci(&pkg.dir, "html_ui").unwrap_or_else(|| pkg.dir.join("html_ui"));
         let panel_dir = gauge.panel.parent().map(Path::to_path_buf).unwrap_or_else(|| pkg.dir.clone());
         self.bridge.register(id, package, html_ui, panel_dir);
@@ -230,8 +222,7 @@ impl Runtime {
     }
 
     pub fn start_aircraft(&mut self, package: &str, aircraft: &str, variant: Option<&str>) -> Result<Vec<u64>> {
-        let community = self.community.as_ref().ok_or_else(|| anyhow!("no community scanned"))?;
-        let pkg = community.package(package).ok_or_else(|| anyhow!("unknown package"))?;
+        let pkg = self.package.as_ref().ok_or_else(|| anyhow!("no package loaded"))?;
         let plane = pkg
             .aircraft
             .iter()
