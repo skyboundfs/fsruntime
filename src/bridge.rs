@@ -151,16 +151,30 @@ fn handle(mut stream: TcpStream, state: Arc<Mutex<BridgeState>>) -> Result<()> {
             return write_body(&mut stream, "text/plain", b"unknown package");
         };
         let decoded = percent_decode(inner);
-        let candidate = root.html_ui.join(&decoded);
-        let path = if candidate.is_file() {
-            candidate
-        } else {
-            let fallback = root.panel_dir.join(decoded.rsplit('/').next().unwrap_or(&decoded));
-            if fallback.is_file() {
-                fallback
-            } else {
-                return write_body(&mut stream, "text/plain", b"asset not found");
+        // Pages live under html_ui/Pages/VCockpit/Instruments/<gauge>/, so try
+        // the package root and the usual MSFS roots before giving up.
+        let roots = [
+            root.html_ui.join("Pages/VCockpit/Instruments"),
+            root.html_ui.clone(),
+            root.panel_dir.clone(),
+        ];
+        let mut found = None;
+        for base in roots {
+            let candidate = base.join(&decoded);
+            if candidate.is_file() {
+                found = Some(candidate);
+                break;
             }
+            if let Some(name) = decoded.rsplit('/').next() {
+                let sibling = base.join(name);
+                if sibling.is_file() {
+                    found = Some(sibling);
+                    break;
+                }
+            }
+        }
+        let Some(path) = found else {
+            return write_body(&mut stream, "text/plain", b"asset not found");
         };
         return serve_file(&mut stream, &path, &method);
     }

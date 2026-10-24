@@ -81,7 +81,11 @@ pub fn run(event_loop: tao::event_loop::EventLoop<GuiEvent>, sink: GuiSink) {
 }
 
 pub fn make_event_loop() -> (tao::event_loop::EventLoop<GuiEvent>, GuiSink) {
-    let event_loop = EventLoopBuilder::<GuiEvent>::with_user_event().build();
+    use tao::platform::unix::EventLoopBuilderExtUnix;
+    // eframe owns the main thread, so the instrument loop lives on a worker.
+    let mut builder = EventLoopBuilder::<GuiEvent>::with_user_event();
+    builder.with_any_thread(true);
+    let event_loop = builder.build();
     let sink = GuiSink {
         proxy: event_loop.create_proxy(),
         base_url: Arc::new(Mutex::new(String::new())),

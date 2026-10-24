@@ -193,7 +193,13 @@ pub struct Gauge {
 impl Gauge {
     pub fn title(&self) -> String {
         match &self.kind {
-            GaugeKind::Wasm { gauge, .. } => format!("{} [wasm]", gauge),
+            GaugeKind::Wasm { gauge, params, .. } => {
+                if params.is_empty() {
+                    format!("{gauge} [wasm]")
+                } else {
+                    format!("{gauge} [{params}]")
+                }
+            }
             GaugeKind::Html { page, query, .. } => {
                 let name = page.rsplit('/').next().unwrap_or(page);
                 if query.is_empty() {
@@ -483,15 +489,14 @@ fn parse_panel(package: &Path, path: &Path) -> Result<Vec<Gauge>> {
             }
             let Some((spec, rect)) = value.split_once(',') else { continue };
             let spec = spec.trim();
-            let mut parts = rect.split(',');
-            let width = parts
-                .next()
-                .and_then(|v| v.trim().parse::<u32>().ok())
-                .unwrap_or(0);
-            let height = parts
-                .next()
-                .and_then(|v| v.trim().parse::<u32>().ok())
-                .unwrap_or(0);
+            // "<page>, x, y, width, height[, params]" - the params are what
+            // MSFS passes to the gauge as strParameters.
+            let mut parts = rect.split(',').map(str::trim);
+            let _x = parts.next();
+            let _y = parts.next();
+            let width = parts.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+            let height = parts.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+            let panel_params: String = parts.collect::<Vec<_>>().join(",");
             let (page, query) = match spec.split_once('?') {
                 Some((p, q)) => (p, q),
                 None => (spec, ""),
@@ -500,7 +505,10 @@ fn parse_panel(package: &Path, path: &Path) -> Result<Vec<Gauge>> {
                 let params = parse_query(query);
                 let module = params.get("wasm_module").cloned().unwrap_or_default();
                 let gauge = params.get("wasm_gauge").cloned().unwrap_or_default();
-                let extra = params.get("params").cloned().unwrap_or_default();
+                let extra = params
+                    .get("params")
+                    .cloned()
+                    .unwrap_or_else(|| panel_params.clone());
                 let module_path = resolve_wasm(package, panel_dir, &module);
                 GaugeKind::Wasm { module, gauge, params: extra, module_path }
             } else {

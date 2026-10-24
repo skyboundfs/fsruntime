@@ -1,3 +1,4 @@
+mod app;
 mod bridge;
 mod fsrender;
 mod gui;
@@ -6,7 +7,6 @@ mod pkg;
 mod render;
 mod runtime;
 mod sim;
-mod tui;
 mod wasmhost;
 
 use anyhow::Result;
@@ -51,26 +51,30 @@ fn main() -> Result<()> {
         return headless(root, launch);
     }
 
-    let (event_loop, sink) = gui::make_event_loop();
+    // tao's EventLoop is !Send, so the window thread must create it too.
+    // eframe owns the main thread for the control window.
+    let (sink_tx, sink_rx) = mpsc::channel();
+    let window_thread = std::thread::Builder::new()
+        .name("msfs-windows".into())
+        .spawn(move || {
+            let (event_loop, sink) = gui::make_event_loop();
+            if sink_tx.send(sink.clone()).is_err() {
+                return;
+            }
+            gui::run(event_loop, sink);
+        })?;
+    let sink = sink_rx
+        .recv()
+        .map_err(|_| anyhow::anyhow!("window thread failed to start"))?;
+
     let (request_tx, request_rx) = mpsc::channel::<runtime::RuntimeRequest>();
-    let mut runtime = runtime::Runtime::new()?;
+    let runtime = runtime::Runtime::new()?;
     sink.set_base_url(runtime.bridge.base_url());
     runtime.bridge.set_requests(request_tx.clone());
 
-    let tui_sink = sink.clone();
-    let tui_root = root.clone();
-    let tui_requests = request_tx.clone();
-    let tui_launch = launch.clone();
-
-    let tui_thread = std::thread::Builder::new()
-        .name("msfs-tui".into())
-        .spawn(move || -> Result<()> {
-            tui::run(&mut runtime, tui_requests, request_rx, tui_sink, tui_root, tui_launch)
-        })?;
-
-    gui::run(event_loop, sink);
-    let _ = tui_thread.join();
-    Ok(())
+    let result = app::run(runtime, request_tx, request_rx, sink, root, launch);
+    let _ = window_thread.join();
+    result
 }
 
 fn headless(root: PathBuf, launch: Option<(String, Option<String>)>) -> Result<()> {

@@ -16,11 +16,12 @@ serde_json = "1"
 walkdir = "2"
 wasmtime = "50"
 wasmtime-wasi = "50"
-ratatui = { version = "0.30", default-features = false, features = ["crossterm", "crossterm_0_29"] }
-crossterm = "0.29"
 tao = "0.34"
 wry = "0.53"
 png = "0.18.1"
+eframe = { version = "0.32", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+egui = "0.32"
+rfd = "0.15"
 
 [profile.dev]
 opt-level = 1
