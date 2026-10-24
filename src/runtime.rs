@@ -277,11 +277,14 @@ impl Runtime {
             }
         }
         if broadcast & crate::wasmhost::FS_COMMBUS_BROADCAST_JS != 0 {
+            // fsCommBusCall is given a buffer size, not a string length, so the
+            // tail is uninitialised memory. JS callers JSON.parse the payload.
+            let text = payload.split(|b| *b == 0).next().unwrap_or(&[]);
             self.commbus_seq += 1;
             self.commbus_out.push(PollItem {
                 seq: self.commbus_seq,
                 name,
-                payload: String::from_utf8_lossy(&payload).to_string(),
+                payload: String::from_utf8_lossy(text).to_string(),
             });
             if self.commbus_out.len() > 500 {
                 self.commbus_out.remove(0);

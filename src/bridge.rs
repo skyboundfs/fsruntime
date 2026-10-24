@@ -174,12 +174,31 @@ fn handle(mut stream: TcpStream, state: Arc<Mutex<BridgeState>>) -> Result<()> {
             }
         }
         let Some(path) = found else {
+            // MSFS built-ins such as /JS/Services/CommBus.js are not part of the
+            // package; inject.js already provides those APIs, so hand back an
+            // empty script instead of error text the browser would parse.
+            if decoded.to_ascii_lowercase().ends_with(".js") {
+                return write_body(&mut stream, "application/javascript", b"");
+            }
             return write_body(&mut stream, "text/plain", b"asset not found");
         };
+        if path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("html")) {
+            return serve_page(&mut stream, &path, id);
+        }
         return serve_file(&mut stream, &path, &method);
     }
 
     write_body(&mut stream, "text/plain", b"not found")
+}
+
+/// MSFS instrument pages are fragments meant to be injected into a host
+/// document, so wrap them and let the shell pull in their import-script tags.
+fn serve_page(stream: &mut TcpStream, path: &Path, session: u64) -> Result<()> {
+    let content = std::fs::read_to_string(path)?;
+    let page = include_str!("instrument_host.html")
+        .replace("__CONTENT__", &content)
+        .replace("__SESSION__", &session.to_string());
+    write_body(stream, "text/html", page.as_bytes())
 }
 
 fn serve_file(stream: &mut TcpStream, path: &Path, _method: &str) -> Result<()> {

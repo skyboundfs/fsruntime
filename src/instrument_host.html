@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>instrument</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+  #InstrumentMount { width: 100%; height: 100%; }
+</style>
+<script src="/inject.js"></script>
+</head>
+<body>
+<div id="InstrumentMount"></div>
+__CONTENT__
+<script>
+(function () {
+  "use strict";
+  var session = Number("__SESSION__" || 0);
+  // MSFS pages are fragments: templates stay inert, and their scripts are
+  // pulled in through <script type="text/html" import-script="...">, where the
+  // path is relative to html_ui. Rewrite each to this session's asset route.
+  var pending = [];
+  var nodes = document.querySelectorAll('script[import-script]');
+  for (var i = 0; i < nodes.length; i++) {
+    pending.push(nodes[i].getAttribute("import-script"));
+  }
+  function loadNext() {
+    var path = pending.shift();
+    if (!path) return;
+    var script = document.createElement("script");
+    script.src = "/instrument/" + session + (path.charAt(0) === "/" ? path : "/" + path);
+    script.async = false;
+    script.onload = loadNext;
+    script.onerror = loadNext;
+    document.head.appendChild(script);
+  }
+  loadNext();
+})();
+</script>
+</body>
+</html>
