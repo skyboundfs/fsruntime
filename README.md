@@ -16,6 +16,19 @@ cargo build --release
 
 Set `FSRUNTIME_HEADLESS=1` for a non-interactive scan and diagnostic report.
 
+## Layout
+
+```
+src/
+  main.rs        CLI and thread wiring
+  pkg.rs         package/aircraft/panel.cfg scanning
+  runtime.rs     session lifecycle and request handling
+  bridge.rs      localhost HTTP bridge serving instruments to webviews
+  ui/            control window (egui) and instrument windows (tao/wry)
+  engine/        wasmtime host, simulated state, software renderer
+  web/           JS injected into instrument pages and host shells
+```
+
 ## Pull requests
 
 Not open unless contacted and agreed beforehand.
