@@ -8,6 +8,7 @@ use crate::pkg::{Gauge, GaugeKind, Package};
 use crate::runtime::{Runtime, RuntimeRequest};
 use crate::ui::windows::{GuiCommand, GuiSink};
 use egui::{Align, Color32, Layout, RichText};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
@@ -53,6 +54,7 @@ struct App {
     instance: Option<u64>,
     path_input: String,
     last_tick: Instant,
+    window_visible: HashMap<u64, bool>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -84,6 +86,7 @@ impl App {
             variant: 0,
             instance: None,
             last_tick: Instant::now(),
+            window_visible: HashMap::new(),
         }
     }
 
@@ -159,7 +162,23 @@ impl App {
         let title = session.title.clone();
         let (w, h) = (session.gauge.width, session.gauge.height);
         self.gui.send(GuiCommand::OpenInstrument { session: id, title, html, width: w, height: h });
+        self.window_visible.insert(id, false); // starts hidden
         true
+    }
+
+    fn show_window(&mut self, id: u64) {
+        self.gui.send(GuiCommand::ShowWindow { session: id });
+        self.window_visible.insert(id, true);
+    }
+
+    fn hide_window(&mut self, id: u64) {
+        self.gui.send(GuiCommand::HideWindow { session: id });
+        self.window_visible.insert(id, false);
+    }
+
+    fn close_window(&mut self, id: u64) {
+        self.gui.send(GuiCommand::CloseInstrument { session: id });
+        self.window_visible.remove(&id);
     }
 
     fn launch_single(&mut self, gauge: &Gauge) {
@@ -442,6 +461,15 @@ impl App {
                         ui.horizontal(|ui| {
                             let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
                             ui.painter().circle_filled(rect.center(), 4.0, dot);
+
+                            // Visibility indicator
+                            let has_window = self.window_visible.contains_key(id);
+                            let is_visible = self.window_visible.get(id).copied().unwrap_or(false);
+                            let icon = if is_visible { "👁" } else if has_window { "⊙" } else { "" };
+                            if !icon.is_empty() {
+                                ui.label(icon);
+                            }
+
                             let text = format!("#{id}  {}", session.title);
                             if ui.selectable_label(self.instance == Some(*id), text).clicked() {
                                 self.instance = Some(*id);
@@ -458,6 +486,9 @@ impl App {
         // Deferred: the panel closure borrows the runtime immutably, so any
         // &mut self action runs after it closes.
         let mut reopen = false;
+        let mut show_window: Option<u64> = None;
+        let mut hide_window: Option<u64> = None;
+        let mut close_window: Option<u64> = None;
         egui::CentralPanel::default().show_inside(ui, |ui| {
             let Some(id) = selected else {
                 ui.label("Select a session.");
@@ -469,7 +500,27 @@ impl App {
                 ui.heading(&session.title);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.add_enabled_ui(session.error.is_none(), |ui| {
-                        reopen |= ui.button("Open window").clicked();
+                        let has_window = self.window_visible.contains_key(&id);
+                        let is_visible = self.window_visible.get(&id).copied().unwrap_or(false);
+
+                        if has_window {
+                            if is_visible {
+                                if ui.button("Hide").on_hover_text("Hide this window (keeps running in background)").clicked() {
+                                    hide_window = Some(id);
+                                }
+                            } else {
+                                if ui.button("Show").on_hover_text("Show this window").clicked() {
+                                    show_window = Some(id);
+                                }
+                            }
+                            if ui.button("Close").on_hover_text("Stop this instrument and close its window").clicked() {
+                                close_window = Some(id);
+                            }
+                        } else {
+                            if ui.button("Open").on_hover_text("Start this instrument in a hidden window").clicked() {
+                                reopen = true;
+                            }
+                        }
                     });
                 });
             });
@@ -526,6 +577,15 @@ impl App {
             if let Some(id) = selected {
                 self.open_window(id);
             }
+        }
+        if let Some(id) = show_window {
+            self.show_window(id);
+        }
+        if let Some(id) = hide_window {
+            self.hide_window(id);
+        }
+        if let Some(id) = close_window {
+            self.close_window(id);
         }
     }
 

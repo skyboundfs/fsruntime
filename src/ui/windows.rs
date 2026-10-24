@@ -7,6 +7,8 @@ use tao::window::{Window, WindowBuilder, WindowId};
 #[derive(Clone, Debug)]
 pub enum GuiCommand {
     OpenInstrument { session: u64, title: String, html: String, width: u32, height: u32 },
+    ShowWindow { session: u64 },
+    HideWindow { session: u64 },
     CloseInstrument { session: u64 },
     CloseAll,
     Quit,
@@ -42,6 +44,7 @@ pub struct InstrumentWindow {
     pub window: Window,
     pub webview: wry::WebView,
     pub session: u64,
+    pub visible: bool,
 }
 
 pub fn run(event_loop: tao::event_loop::EventLoop<GuiEvent>, sink: GuiSink) {
@@ -50,11 +53,24 @@ pub fn run(event_loop: tao::event_loop::EventLoop<GuiEvent>, sink: GuiSink) {
         *control_flow = ControlFlow::Wait;
         match event {
             Event::UserEvent(GuiEvent::Command(GuiCommand::OpenInstrument { session, title, html, width, height })) => {
-                match open_window(target, session, &title, &html, width, height, sink.base_url()) {
+                // Open hidden by default to avoid overwhelming the system
+                match open_window(target, session, &title, &html, width, height, sink.base_url(), false) {
                     Ok(window) => {
                         windows.insert(window.window.id(), window);
                     }
                     Err(e) => eprintln!("failed to open instrument window: {e}"),
+                }
+            }
+            Event::UserEvent(GuiEvent::Command(GuiCommand::ShowWindow { session })) => {
+                if let Some(window) = windows.values_mut().find(|w| w.session == session) {
+                    window.window.set_visible(true);
+                    window.visible = true;
+                }
+            }
+            Event::UserEvent(GuiEvent::Command(GuiCommand::HideWindow { session })) => {
+                if let Some(window) = windows.values_mut().find(|w| w.session == session) {
+                    window.window.set_visible(false);
+                    window.visible = false;
                 }
             }
             Event::UserEvent(GuiEvent::Command(GuiCommand::CloseInstrument { session })) => {
@@ -71,9 +87,11 @@ pub fn run(event_loop: tao::event_loop::EventLoop<GuiEvent>, sink: GuiSink) {
                 *control_flow = ControlFlow::Exit;
             }
             Event::WindowEvent { window_id, event: WindowEvent::CloseRequested, .. } => {
-                // Closing the last instrument leaves the app running; the TUI
-                // stays alive and can spawn new windows.
-                windows.remove(&window_id);
+                // Close button hides the window instead of destroying it
+                if let Some(window) = windows.get_mut(&window_id) {
+                    window.window.set_visible(false);
+                    window.visible = false;
+                }
             }
             _ => {}
         }
@@ -113,10 +131,12 @@ fn open_window(
     width: u32,
     height: u32,
     base_url: String,
+    visible: bool,
 ) -> anyhow::Result<InstrumentWindow> {
     let window = WindowBuilder::new()
         .with_title(format!("{title} [{session}]"))
         .with_inner_size(tao::dpi::LogicalSize::new(width.max(160) as f64, height.max(120) as f64))
+        .with_visible(visible)
         .build(target)?;
     let init = format!(
         "window.__MSFS_SESSION__ = {session}; window.__MSFS_BASE__ = {base:?};",
@@ -141,18 +161,18 @@ fn open_window(
             .default_vbox()
             .ok_or_else(|| anyhow::anyhow!("window has no default container"))?;
         let webview = builder.build_gtk(vbox)?;
-        Ok(InstrumentWindow { window, webview, session })
+        Ok(InstrumentWindow { window, webview, session, visible })
     }
     #[cfg(target_os = "windows")]
     {
         use wry::WebViewBuilderExtWindows;
         let webview = builder.build_as_child(&window)?;
-        Ok(InstrumentWindow { window, webview, session })
+        Ok(InstrumentWindow { window, webview, session, visible })
     }
     #[cfg(target_os = "macos")]
     {
         use wry::WebViewBuilderExtMacOS;
         let webview = builder.build_as_child(&window)?;
-        Ok(InstrumentWindow { window, webview, session })
+        Ok(InstrumentWindow { window, webview, session, visible })
     }
 }
