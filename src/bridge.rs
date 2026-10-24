@@ -129,11 +129,11 @@ fn handle(mut stream: TcpStream, state: Arc<Mutex<BridgeState>>) -> Result<()> {
     }
     if path == "/wasm-instrument.html" {
         let session = params.get("session").cloned().unwrap_or_default();
-        let page = include_str!("wasm_instrument.html").replace("__SESSION__", &session);
+        let page = include_str!("web/wasm_instrument.html").replace("__SESSION__", &session);
         return write_body(&mut stream, "text/html", page.as_bytes());
     }
     if path == "/inject.js" {
-        let js = include_str!("inject.js");
+        let js = include_str!("web/inject.js");
         return write_body(&mut stream, "application/javascript", js.as_bytes());
     }
     if let Some(rest) = path.strip_prefix("/instrument/") {
@@ -195,7 +195,7 @@ fn handle(mut stream: TcpStream, state: Arc<Mutex<BridgeState>>) -> Result<()> {
 /// document, so wrap them and let the shell pull in their import-script tags.
 fn serve_page(stream: &mut TcpStream, path: &Path, session: u64) -> Result<()> {
     let content = std::fs::read_to_string(path)?;
-    let page = include_str!("instrument_host.html")
+    let page = include_str!("web/instrument_host.html")
         .replace("__CONTENT__", &content)
         .replace("__SESSION__", &session.to_string());
     write_body(stream, "text/html", page.as_bytes())
