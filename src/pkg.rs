@@ -309,7 +309,9 @@ impl Aircraft {
                 match parse_variants(&cfg) {
                     Ok(parsed) => {
                         for mut variant in parsed {
-                            variant.panel_dir = resolve_panel_dir(dir, variant_dir.as_deref());
+                            if variant.panel_dir.is_none() {
+                                variant.panel_dir = resolve_panel_dir(dir, variant_dir.as_deref());
+                            }
                             variant.gauges = load_gauges(package, &variant, dir, &mut issues);
                             variant.modules = module_list(variant.panel_dir.as_deref());
                             variants.push(variant);
@@ -326,7 +328,9 @@ impl Aircraft {
                 match parse_variants(&cfg) {
                     Ok(parsed) => {
                         for mut variant in parsed {
-                            variant.panel_dir = resolve_panel_dir(dir, variant_dir.as_deref());
+                            if variant.panel_dir.is_none() {
+                                variant.panel_dir = resolve_panel_dir(dir, variant_dir.as_deref());
+                            }
                             variant.gauges = load_gauges(package, &variant, dir, &mut issues);
                             variant.modules = module_list(variant.panel_dir.as_deref());
                             variants.push(variant);
@@ -447,6 +451,7 @@ fn collect_configs(dir: &Path, file: &str) -> Vec<PathBuf> {
 fn parse_variants(path: &Path) -> Result<Vec<Variant>> {
     let text = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     let ini = Ini::parse(&text);
+    let variant_dir = path.parent().unwrap_or(Path::new("."));
     let mut out = Vec::new();
     for section in ini.sections.keys() {
         if !section.to_ascii_uppercase().starts_with("FLTSIM.") {
@@ -457,6 +462,25 @@ fn parse_variants(path: &Path) -> Result<Vec<Variant>> {
         if title.is_empty() {
             continue;
         }
+        let panel_key = get("panel");
+        let panel_dir = if !panel_key.is_empty() {
+            let cleaned = panel_key.trim_start_matches('\\').replace('\\', "/");
+            let mut resolved = variant_dir.join(&cleaned);
+
+            // Try canonicalizing the path
+            let mut canonical = resolved.canonicalize().ok();
+
+            // Workaround: some packages have an extra leading .. in the Panel path
+            if canonical.is_none() && cleaned.starts_with("../") {
+                let fallback = cleaned.strip_prefix("../").unwrap_or(&cleaned);
+                resolved = variant_dir.join(fallback);
+                canonical = resolved.canonicalize().ok();
+            }
+
+            canonical.filter(|p| p.join("panel.cfg").is_file())
+        } else {
+            None
+        };
         out.push(Variant {
             title,
             ui_variation: get("ui_variation"),
@@ -464,6 +488,7 @@ fn parse_variants(path: &Path) -> Result<Vec<Variant>> {
             ui_manufacturer: get("ui_manufacturer"),
             atc_id: get("atc_id"),
             source: path.to_path_buf(),
+            panel_dir,
             ..Default::default()
         });
     }
