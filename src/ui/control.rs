@@ -4,9 +4,10 @@
 //! The runtime is owned by this thread; the instrument windows live on the
 //! tao/wry thread and are driven through `GuiSink`.
 
-use crate::ui::windows::{GuiCommand, GuiSink};
 use crate::pkg::{Gauge, GaugeKind, Package};
 use crate::runtime::{Runtime, RuntimeRequest};
+use crate::ui::windows::{GuiCommand, GuiSink};
+use egui::{Align, Color32, Layout, RichText};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
@@ -25,8 +26,8 @@ pub fn run(
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([980.0, 640.0])
-            .with_min_inner_size([560.0, 360.0])
+            .with_inner_size([1040.0, 680.0])
+            .with_min_inner_size([640.0, 400.0])
             .with_title("fsruntime"),
         ..Default::default()
     };
@@ -88,10 +89,7 @@ impl App {
 
     fn startup(&mut self) {
         if !self.root.as_os_str().is_empty() {
-            match self.runtime.scan(&self.root) {
-                Ok(()) => self.status = format!("loaded {}", self.root.display()),
-                Err(e) => self.status = format!("load failed: {e}"),
-            }
+            self.load_root(self.root.clone(), "loaded");
         }
         if let Some((package, aircraft)) = self.initial_launch.take() {
             let plane = aircraft.or_else(|| {
@@ -106,6 +104,19 @@ impl App {
                 let variant = std::env::var("FSRUNTIME_VARIANT").ok();
                 self.run_variant(&package, &plane, variant.as_deref());
             }
+        }
+    }
+
+    /// Scan a package root, reset selection, report the outcome in the status bar.
+    fn load_root(&mut self, path: PathBuf, verb: &str) {
+        match self.runtime.scan(&path) {
+            Ok(()) => {
+                self.root = path;
+                self.aircraft = 0;
+                self.variant = 0;
+                self.status = format!("{verb} {}", self.root.display());
+            }
+            Err(e) => self.status = format!("{verb} failed: {e}"),
         }
     }
 
@@ -131,6 +142,8 @@ impl App {
                         opened += 1;
                     }
                 }
+                self.tab = Tab::Sessions;
+                self.instance = ids.first().copied();
                 self.status = format!("launched {aircraft} - {opened}/{} screens", ids.len());
             }
             Err(e) => self.status = format!("launch failed: {e}"),
@@ -193,56 +206,8 @@ impl eframe::App for App {
         // The runtime advances continuously, so keep repainting.
         ctx.request_repaint_after(Duration::from_millis(33));
 
-        egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.tab, Tab::Browser, "Browser");
-                ui.selectable_value(&mut self.tab, Tab::Sessions, "Sessions");
-                ui.selectable_value(&mut self.tab, Tab::Log, "Log");
-                ui.separator();
-                if ui.button("Open package…").clicked() {
-                    if let Some(dir) = rfd_pick_folder() {
-                        self.path_input = dir.display().to_string();
-                        match self.runtime.scan(&dir) {
-                            Ok(()) => {
-                                self.root = dir;
-                                self.aircraft = 0;
-                                self.variant = 0;
-                                self.status = format!("loaded {}", self.root.display());
-                            }
-                            Err(e) => self.status = format!("load failed: {e}"),
-                        }
-                    }
-                }
-                if ui.button("Reload").clicked() {
-                    let root = self.root.clone();
-                    match self.runtime.scan(&root) {
-                        Ok(()) => self.status = format!("reloaded {}", root.display()),
-                        Err(e) => self.status = format!("reload failed: {e}"),
-                    }
-                }
-                if ui.button("Stop all").clicked() {
-                    let _ = self.request_tx.send(RuntimeRequest::StopAll);
-                    self.gui.send(GuiCommand::CloseAll);
-                    self.status = "stopped all instances".to_string();
-                }
-            });
-        });
-
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(&self.status);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "{} sessions · bridge {}",
-                            self.runtime.sessions.len(),
-                            self.runtime.bridge.base_url()
-                        ))
-                        .weak(),
-                    );
-                });
-            });
-        });
+        self.toolbar(ctx);
+        self.status_bar(ctx);
 
         egui::CentralPanel::default().show(ctx, |ui| match self.tab {
             Tab::Browser => self.browser(ui),
@@ -253,48 +218,72 @@ impl eframe::App for App {
 }
 
 impl App {
+    fn toolbar(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.tab, Tab::Browser, "📦  Browser");
+                ui.selectable_value(&mut self.tab, Tab::Sessions, {
+                    let n = self.runtime.sessions.len();
+                    if n > 0 { format!("▶  Sessions ({n})") } else { "▶  Sessions".to_string() }
+                });
+                ui.selectable_value(&mut self.tab, Tab::Log, "📄  Log");
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button("Stop all").on_hover_text("Kill every running instrument session and close its window").clicked() {
+                        let _ = self.request_tx.send(RuntimeRequest::StopAll);
+                        self.gui.send(GuiCommand::CloseAll);
+                        self.instance = None;
+                        self.status = "stopped all instances".to_string();
+                    }
+                    if ui.button("Reload").on_hover_text("Re-scan the current package").clicked() {
+                        let root = self.root.clone();
+                        self.load_root(root, "reloaded");
+                    }
+                    if ui.button("Open package…").clicked() {
+                        if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                            self.path_input = dir.display().to_string();
+                            self.load_root(dir, "loaded");
+                        }
+                    }
+                });
+            });
+        });
+    }
+
+    fn status_bar(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(&self.status);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} sessions · bridge {}",
+                            self.runtime.sessions.len(),
+                            self.runtime.bridge.base_url()
+                        ))
+                        .weak(),
+                    );
+                });
+            });
+        });
+    }
+
     fn browser(&mut self, ui: &mut egui::Ui) {
         if self.package().is_none() {
-            ui.label("No package loaded. Use “Open package…” or pass a path on the command line.");
-            ui.horizontal(|ui| {
-                ui.text_edit_singleline(&mut self.path_input);
-                if ui.button("Load").clicked() {
-                    let path = PathBuf::from(self.path_input.clone());
-                    match self.runtime.scan(&path) {
-                        Ok(()) => {
-                            self.root = path;
-                            self.aircraft = 0;
-                            self.variant = 0;
-                            self.status = format!("loaded {}", self.root.display());
-                        }
-                        Err(e) => self.status = format!("load failed: {e}"),
-                    }
-                }
-            });
+            self.empty_browser(ui);
             return;
         }
 
         let Some(package) = self.package() else { return };
         let aircraft_keys: Vec<String> = package.aircraft.iter().map(|a| a.key.clone()).collect();
-        let variants: Vec<(String, usize)> = self
-            .selected_aircraft()
-            .map(|a| {
-                a.variants
-                    .iter()
-                    .map(|v| (v.label(), v.gauges.len()))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let package_name = package.name.clone();
 
-        let mut run = false;
-        let list_height = (ui.available_height() - 40.0).max(80.0);
-        ui.columns(2, |cols| {
-            cols[0].heading("Aircraft");
-            cols[0].separator();
-            egui::ScrollArea::vertical()
-                .id_salt("aircraft")
-                .max_height(list_height)
-                .show(&mut cols[0], |ui| {
+        egui::SidePanel::left("aircraft_pane")
+            .exact_width(220.0)
+            .show_inside(ui, |ui| {
+                ui.label(RichText::new(&package_name).strong());
+                ui.label(RichText::new(format!("{} aircraft", aircraft_keys.len())).weak());
+                ui.separator();
+                egui::ScrollArea::vertical().show(ui, |ui| {
                     for (i, key) in aircraft_keys.iter().enumerate() {
                         if ui.selectable_label(self.aircraft == i, key).clicked() {
                             self.aircraft = i;
@@ -302,81 +291,138 @@ impl App {
                         }
                     }
                 });
+            });
 
-            cols[1].heading("Variants");
-            cols[1].separator();
-            egui::ScrollArea::vertical()
-                .id_salt("variants")
-                .max_height(list_height)
-                .show(&mut cols[1], |ui| {
+        let variants: Vec<(String, usize)> = self
+            .selected_aircraft()
+            .map(|a| a.variants.iter().map(|v| (v.label(), v.gauges.len())).collect())
+            .unwrap_or_default();
+
+        let mut run = None;
+        egui::SidePanel::left("variants_pane")
+            .exact_width(240.0)
+            .show_inside(ui, |ui| {
+                ui.label(RichText::new("Variants").strong());
+                ui.separator();
+                egui::ScrollArea::vertical().show(ui, |ui| {
                     for (i, (label, gauges)) in variants.iter().enumerate() {
-                        let text = format!("{label}  ·  {gauges} screens");
-                        if ui.selectable_label(self.variant == i, text).clicked() {
-                            self.variant = i;
-                        }
-                        if ui.small_button("Run").clicked() {
-                            self.variant = i;
-                            run = true;
-                        }
+                        ui.horizontal(|ui| {
+                            if ui
+                                .selectable_label(self.variant == i, format!("{label}"))
+                                .on_hover_text(format!("{gauges} screens"))
+                                .clicked()
+                            {
+                                self.variant = i;
+                            }
+                            if ui.small_button("▶").on_hover_text(format!("Run {label}")).clicked() {
+                                self.variant = i;
+                                run = Some(i);
+                            }
+                        });
+                        ui.label(RichText::new(format!("   {gauges} screens")).weak());
                     }
                 });
+            });
+
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            self.variant_detail(ui, &mut run);
         });
 
-        ui.separator();
-        let can_run = !aircraft_keys.is_empty() && !variants.is_empty();
-        ui.horizontal(|ui| {
-            if ui
-                .add_enabled(can_run, egui::Button::new("Run this variant"))
-                .clicked()
-            {
-                run = true;
-            }
-            ui.label(
-                egui::RichText::new("Opens every screen declared in the variant's panel.cfg")
-                    .weak(),
-            );
-        });
-
-        if run {
-            let package = self.package().map(|p| p.name.clone()).unwrap_or_default();
+        if run.is_some() {
             let plane = aircraft_keys.get(self.aircraft).cloned().unwrap_or_default();
             let variant = variants.get(self.variant).map(|(l, _)| l.clone());
-            self.run_variant(&package, &plane, variant.as_deref());
+            self.run_variant(&package_name, &plane, variant.as_deref());
         }
+    }
 
-        ui.separator();
-        ui.collapsing("Individual instruments", |ui| {
-            let gauges: Vec<Gauge> = self
-                .selected_variant()
-                .map(|v| v.gauges.clone())
-                .unwrap_or_default();
-            if gauges.is_empty() {
-                ui.label("No instruments in this variant.");
-                return;
-            }
-            let mut launch: Option<Gauge> = None;
-            for gauge in &gauges {
-                ui.horizontal(|ui| {
-                    let kind = match &gauge.kind {
-                        GaugeKind::Wasm { .. } => "wasm",
-                        GaugeKind::Html { .. } => "html",
-                    };
-                    ui.monospace(format!("{kind:<4} {}x{}", gauge.width, gauge.height));
-                    ui.label(gauge.title());
-                    if ui.small_button("Open").clicked() {
-                        launch = Some(gauge.clone());
+    fn empty_browser(&mut self, ui: &mut egui::Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(ui.available_height() * 0.25);
+            ui.heading("No package loaded");
+            ui.label(RichText::new("Point fsruntime at an MSFS Community folder or an addon package.").weak());
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.add_sized([360.0, 24.0], egui::TextEdit::singleline(&mut self.path_input).hint_text("/path/to/Community"));
+                if ui.button("Load").clicked() {
+                    let path = PathBuf::from(self.path_input.clone());
+                    self.load_root(path, "loaded");
+                }
+                if ui.button("Browse…").clicked() {
+                    if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                        self.path_input = dir.display().to_string();
+                        self.load_root(dir, "loaded");
                     }
+                }
+            });
+        });
+    }
+
+    /// Right pane of the browser: details of the selected variant plus its
+    /// instrument list with per-screen launch buttons.
+    fn variant_detail(&mut self, ui: &mut egui::Ui, run: &mut Option<usize>) {
+        let Some(variant) = self.selected_variant() else {
+            ui.label("Select an aircraft and variant.");
+            return;
+        };
+        let label = variant.label();
+        let gauges = variant.gauges.clone();
+        ui.horizontal(|ui| {
+            ui.heading(&label);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui
+                    .add_enabled(!gauges.is_empty(), egui::Button::new("▶  Run variant"))
+                    .on_hover_text("Opens every screen declared in the variant's panel.cfg")
+                    .clicked()
+                {
+                    *run = Some(self.variant);
+                }
+            });
+        });
+        ui.label(RichText::new(format!("{} screens", gauges.len())).weak());
+        ui.separator();
+
+        if gauges.is_empty() {
+            ui.label("This variant declares no instruments.");
+            return;
+        }
+        let mut launch: Option<Gauge> = None;
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for gauge in &gauges {
+                let (kind, name) = match &gauge.kind {
+                    GaugeKind::Wasm { gauge, .. } => ("wasm", gauge.clone()),
+                    GaugeKind::Html { page, .. } => ("html", page.clone()),
+                };
+                ui.horizontal(|ui| {
+                    let badge = RichText::new(kind.to_uppercase()).monospace().color(if kind == "wasm" {
+                        Color32::from_rgb(120, 190, 255)
+                    } else {
+                        Color32::from_rgb(160, 220, 140)
+                    });
+                    ui.label(badge);
+                    ui.monospace(format!("{:>4}x{:<4}", gauge.width, gauge.height));
+                    ui.label(gauge.title());
+                    ui.label(RichText::new(name).weak());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.small_button("Open").clicked() {
+                            launch = Some(gauge.clone());
+                        }
+                    });
                 });
-            }
-            if let Some(gauge) = launch {
-                self.launch_single(&gauge);
+                ui.separator();
             }
         });
+        if let Some(gauge) = launch {
+            self.launch_single(&gauge);
+        }
     }
 
     fn sessions(&mut self, ui: &mut egui::Ui) {
         if self.runtime.sessions.is_empty() {
-            ui.label("No sessions yet. Run a variant from the Browser tab.");
+            ui.vertical_centered(|ui| {
+                ui.add_space(ui.available_height() * 0.3);
+                ui.heading("No sessions");
+                ui.label(RichText::new("Run a variant from the Browser tab to start instruments.").weak());
+            });
             return;
         }
         let mut ids: Vec<u64> = self.runtime.sessions.keys().copied().collect();
@@ -384,19 +430,23 @@ impl App {
 
         egui::SidePanel::left("session_list")
             .resizable(true)
-            .default_width(260.0)
+            .default_width(280.0)
             .show_inside(ui, |ui| {
+                ui.label(RichText::new(format!("{} sessions", ids.len())).strong());
+                ui.separator();
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for id in &ids {
                         let Some(session) = self.runtime.sessions.get(id) else { continue };
-                        let state = if session.error.is_some() { "error" } else { "running" };
-                        let label = format!("{id}  {state}  {}", session.title);
-                        if ui
-                            .selectable_label(self.instance == Some(*id), label)
-                            .clicked()
-                        {
-                            self.instance = Some(*id);
-                        }
+                        let failed = session.error.is_some();
+                        let dot = if failed { Color32::from_rgb(230, 90, 90) } else { Color32::from_rgb(90, 200, 120) };
+                        ui.horizontal(|ui| {
+                            let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                            ui.painter().circle_filled(rect.center(), 4.0, dot);
+                            let text = format!("#{id}  {}", session.title);
+                            if ui.selectable_label(self.instance == Some(*id), text).clicked() {
+                                self.instance = Some(*id);
+                            }
+                        });
                     }
                 });
             });
@@ -405,28 +455,36 @@ impl App {
             .instance
             .filter(|id| self.runtime.sessions.contains_key(id))
             .or_else(|| ids.first().copied());
+        // Deferred: the panel closure borrows the runtime immutably, so any
+        // &mut self action runs after it closes.
+        let mut reopen = false;
         egui::CentralPanel::default().show_inside(ui, |ui| {
             let Some(id) = selected else {
                 ui.label("Select a session.");
                 return;
             };
             let Some(session) = self.runtime.sessions.get(&id) else { return };
-            egui::Grid::new("session_detail").num_columns(2).show(ui, |ui| {
-                ui.label("session");
-                ui.monospace(id.to_string());
-                ui.end_row();
-                ui.label("title");
-                ui.label(&session.title);
-                ui.end_row();
-                ui.label("surface");
-                ui.monospace(format!("{}x{}", session.gauge.width, session.gauge.height));
-                ui.end_row();
-                ui.label("package");
-                ui.label(&session.package);
-                ui.end_row();
+
+            ui.horizontal(|ui| {
+                ui.heading(&session.title);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.add_enabled_ui(session.error.is_none(), |ui| {
+                        reopen |= ui.button("Open window").clicked();
+                    });
+                });
             });
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(format!("session #{id}")).weak());
+                ui.label(RichText::new(format!("·  {}x{}", session.gauge.width, session.gauge.height)).weak());
+                ui.label(RichText::new(format!("·  {}", session.package)).weak());
+                if session.frame > 0 {
+                    ui.label(RichText::new(format!("·  frame {}", session.frame)).weak());
+                }
+            });
+            ui.separator();
+
             if let Some(err) = &session.error {
-                ui.colored_label(egui::Color32::RED, err);
+                ui.colored_label(Color32::from_rgb(230, 90, 90), format!("error: {err}"));
             }
             if !session.unsupported.is_empty() {
                 ui.collapsing(
@@ -438,38 +496,59 @@ impl App {
                     },
                 );
             }
-            let reopen = ui.button("Open window").clicked();
             if let Some(instance) = &session.instance {
                 let sim = instance.sim();
-                ui.separator();
-                ui.heading("Simulated state");
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    egui::Grid::new("simvars").num_columns(2).striped(true).show(ui, |ui| {
-                        for def in sim.simvar_table().iter().take(300) {
-                            ui.monospace(&def.name);
-                            ui.monospace(format!("{:.3} {}", def.value, def.unit));
-                            ui.end_row();
-                        }
-                        for (name, value) in sim.lvars().take(200) {
-                            ui.monospace(format!("L:{name}"));
-                            ui.monospace(format!("{value:.3}"));
-                            ui.end_row();
-                        }
+                egui::CollapsingHeader::new(format!(
+                    "Simulated state ({} simvars, {} lvars)",
+                    sim.simvar_table().len(),
+                    sim.lvars().count()
+                ))
+                .default_open(true)
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().max_height(ui.available_height()).show(ui, |ui| {
+                        egui::Grid::new("simvars").num_columns(2).striped(true).show(ui, |ui| {
+                            for def in sim.simvar_table().iter().take(300) {
+                                ui.monospace(&def.name);
+                                ui.monospace(format!("{:.3} {}", def.value, def.unit));
+                                ui.end_row();
+                            }
+                            for (name, value) in sim.lvars().take(200) {
+                                ui.monospace(format!("L:{name}"));
+                                ui.monospace(format!("{value:.3}"));
+                                ui.end_row();
+                            }
+                        });
                     });
                 });
             }
-            if reopen {
+        });
+        if reopen {
+            if let Some(id) = selected {
                 self.open_window(id);
             }
-        });
+        }
     }
 
     fn log(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(format!("{} lines", self.runtime.log.len())).strong());
+            if ui.small_button("Clear").clicked() {
+                self.runtime.log.clear();
+            }
+        });
+        ui.separator();
         egui::ScrollArea::vertical()
             .stick_to_bottom(true)
             .show(ui, |ui| {
                 for line in &self.runtime.log {
-                    ui.monospace(line);
+                    let color = if line.contains("error") || line.contains("failed") {
+                        Color32::from_rgb(230, 120, 120)
+                    } else if line.contains("unsupported") {
+                        Color32::from_rgb(230, 200, 110)
+                    } else {
+                        Color32::GRAY
+                    };
+                    ui.colored_label(color, line);
                 }
             });
     }
@@ -484,9 +563,4 @@ fn instrument_url(runtime: &Runtime, id: u64, gauge: &Gauge) -> String {
         }
         GaugeKind::Wasm { .. } => format!("{base}/wasm-instrument.html?session={id}"),
     }
-}
-
-/// Native folder picker; falls back to None when no desktop portal is present.
-fn rfd_pick_folder() -> Option<PathBuf> {
-    rfd::FileDialog::new().pick_folder()
 }
