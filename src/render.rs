@@ -229,7 +229,7 @@ impl Renderer {
 
     pub fn fill_path(&mut self, paint: &Paint, scissor: &Scissor, fan: &[Vertex], fringe: &[Vertex]) {
         self.draw_calls += 1;
-        if std::env::var("MSFSRUNNER_TRACE_RENDER").is_ok() {
+        if std::env::var("FSRUNTIME_TRACE_RENDER").is_ok() {
             let minx = fan.iter().map(|v| v.x).fold(f32::MAX, f32::min);
             let maxx = fan.iter().map(|v| v.x).fold(f32::MIN, f32::max);
             let miny = fan.iter().map(|v| v.y).fold(f32::MAX, f32::min);

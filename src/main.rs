@@ -47,7 +47,7 @@ fn main() -> Result<()> {
         }
     }
 
-    if std::env::var("MSFSRUNNER_HEADLESS").is_ok() {
+    if std::env::var("FSRUNTIME_HEADLESS").is_ok() {
         return headless(root, launch);
     }
 
@@ -55,7 +55,7 @@ fn main() -> Result<()> {
     // eframe owns the main thread for the control window.
     let (sink_tx, sink_rx) = mpsc::channel();
     let window_thread = std::thread::Builder::new()
-        .name("msfs-windows".into())
+        .name("fsruntime-windows".into())
         .spawn(move || {
             let (event_loop, sink) = gui::make_event_loop();
             if sink_tx.send(sink.clone()).is_err() {
@@ -113,7 +113,7 @@ fn headless(root: PathBuf, launch: Option<(String, Option<String>)>) -> Result<(
     if let Some((package, target)) = launch {
         match target {
             Some(aircraft) => {
-                let variant = std::env::var("MSFSRUNNER_VARIANT").ok();
+                let variant = std::env::var("FSRUNTIME_VARIANT").ok();
                 let ids = runtime.start_aircraft(&package, &aircraft, variant.as_deref())?;
                 println!("started {} sessions", ids.len());
             }
@@ -157,7 +157,7 @@ fn headless(root: PathBuf, launch: Option<(String, Option<String>)>) -> Result<(
                 top.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
                 let summary: Vec<String> = top.iter().take(4).map(|(c, n)| format!("{c:?}x{n}")).collect();
                 println!("  surface {w}x{h} opaque={opaque} colors={}", summary.join(" "));
-                if let Some(path) = std::env::var("MSFSRUNNER_PNG_DIR").ok() {
+                if let Some(path) = std::env::var("FSRUNTIME_PNG_DIR").ok() {
                     let out = std::path::PathBuf::from(path).join(format!("session-{}.png", session.id));
                     let _ = std::fs::create_dir_all(out.parent().unwrap());
                     if let Ok(file) = std::fs::File::create(&out) {
@@ -178,8 +178,8 @@ fn headless(root: PathBuf, launch: Option<(String, Option<String>)>) -> Result<(
 }
 
 fn print_help() {
-    println!("msfsrunner [--community PATH] [--aircraft PACKAGE AIRCRAFT] [--module PATH]");
+    println!("fsruntime [--community PATH] [--aircraft PACKAGE AIRCRAFT] [--module PATH]");
     println!();
     println!("Runs MSFS 2020/2024 addon WASM gauges and HTML instruments without the simulator.");
-    println!("Set MSFSRUNNER_HEADLESS=1 for a non-interactive scan/report.");
+    println!("Set FSRUNTIME_HEADLESS=1 for a non-interactive scan/report.");
 }

@@ -33,15 +33,15 @@ jobs:
 
       - name: Package
         run: |
-          name="msfsrunner-${GITHUB_REF_NAME}-x86_64-linux"
+          name="fsruntime-${GITHUB_REF_NAME}-x86_64-linux"
           mkdir -p "dist/$name"
-          cp target/release/msfsrunner README.md "dist/$name/"
+          cp target/release/fsruntime README.md "dist/$name/"
           tar -C dist -czf "$name.tar.gz" "$name"
           sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
 
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            msfsrunner-*.tar.gz
-            msfsrunner-*.tar.gz.sha256
+            fsruntime-*.tar.gz
+            fsruntime-*.tar.gz.sha256
           generate_release_notes: true

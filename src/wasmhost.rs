@@ -461,7 +461,7 @@ fn case_view(dir: &Path) -> PathBuf {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     dir.hash(&mut hasher);
-    let view = std::env::temp_dir().join(format!("msfsrunner-view-{:x}", hasher.finish()));
+    let view = std::env::temp_dir().join(format!("fsruntime-view-{:x}", hasher.finish()));
     let _ = std::fs::remove_dir_all(&view);
     if std::fs::create_dir_all(&view).is_err() {
         return dir.to_path_buf();
@@ -904,7 +904,7 @@ fn dispatch(caller: &mut Caller<'_, HostState>, name: &str, params: &[Val], resu
         }
         "fsRenderFill" => {
             let paint = read_struct::<FsPaint>(caller, i32_at(params, 1));
-            if std::env::var("MSFSRUNNER_TRACE_RENDER").is_ok() {
+            if std::env::var("FSRUNTIME_TRACE_RENDER").is_ok() {
                 eprintln!(
                     "fill paint={:?} paths={} npaths={}",
                     paint.map(|p| (p.inner_color, p.image, p.extent, p.xform)),
@@ -923,7 +923,7 @@ fn dispatch(caller: &mut Caller<'_, HostState>, name: &str, params: &[Val], resu
                     let Some(path) = read_struct::<FsPath>(caller, addr) else { continue };
                     let fan = read_vertices(caller, path.fill as i32, path.nfill);
                     let strip = read_vertices(caller, path.stroke as i32, path.nstroke);
-                    if std::env::var("MSFSRUNNER_TRACE_RENDER").is_ok() {
+                    if std::env::var("FSRUNTIME_TRACE_RENDER").is_ok() {
                         if let Some(memory) = caller.data().memory {
                             let mut dump = [0u8; 40];
                             let _ = memory.read(&*caller, paths_ptr as usize, &mut dump);
@@ -969,7 +969,7 @@ fn dispatch(caller: &mut Caller<'_, HostState>, name: &str, params: &[Val], resu
         }
         "fsRenderTriangles" => {
             let paint = read_struct::<FsPaint>(caller, i32_at(params, 1));
-            if std::env::var("MSFSRUNNER_TRACE_RENDER").is_ok() {
+            if std::env::var("FSRUNTIME_TRACE_RENDER").is_ok() {
                 eprintln!(
                     "triangles paint={:?} nverts={}",
                     paint.map(|p| (p.inner_color, p.image, p.extent)),
@@ -1228,7 +1228,7 @@ fn simconnect_open_message() -> Vec<u8> {
     msg[0..4].copy_from_slice(&size.to_le_bytes());
     msg[4..8].copy_from_slice(&1u32.to_le_bytes());
     msg[8..12].copy_from_slice(&2u32.to_le_bytes());
-    let name = b"msfsrunner";
+    let name = b"fsruntime";
     msg[12..12 + name.len()].copy_from_slice(name);
     let base = 12 + 256;
     for (i, v) in [1u32, 0, 0, 0, 11, 0, 0, 0, 0, 0].iter().enumerate() {

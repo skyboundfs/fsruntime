@@ -27,11 +27,11 @@ pub fn run(
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([980.0, 640.0])
             .with_min_inner_size([560.0, 360.0])
-            .with_title("msfsrunner"),
+            .with_title("fsruntime"),
         ..Default::default()
     };
     eframe::run_native(
-        "msfsrunner",
+        "fsruntime",
         options,
         Box::new(move |_cc| Ok(Box::new(app))),
     )
@@ -103,7 +103,7 @@ impl App {
                     .map(|a| a.key.clone())
             });
             if let Some(plane) = plane {
-                let variant = std::env::var("MSFSRUNNER_VARIANT").ok();
+                let variant = std::env::var("FSRUNTIME_VARIANT").ok();
                 self.run_variant(&package, &plane, variant.as_deref());
             }
         }

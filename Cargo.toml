@@ -1,12 +1,12 @@
 [package]
-name = "msfsrunner"
+name = "fsruntime"
 version = "0.1.0"
 edition = "2021"
 description = "Standalone runtime for MSFS 2020/2024 addon WASM modules and HTML instruments"
 license = "MIT"
 
 [[bin]]
-name = "msfsrunner"
+name = "fsruntime"
 path = "src/main.rs"
 
 [dependencies]

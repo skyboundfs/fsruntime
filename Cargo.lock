@@ -1545,6 +1545,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "fsruntime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "eframe",
+ "egui",
+ "png",
+ "rfd",
+ "serde",
+ "serde_json",
+ "tao",
+ "walkdir",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wry",
+]
+
+[[package]]
 name = "futf"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2682,24 +2700,6 @@ checksum = "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
 dependencies = [
  "num-traits",
  "pxfm",
-]
-
-[[package]]
-name = "msfsrunner"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "eframe",
- "egui",
- "png",
- "rfd",
- "serde",
- "serde_json",
- "tao",
- "walkdir",
- "wasmtime",
- "wasmtime-wasi",
- "wry",
 ]
 
 [[package]]
