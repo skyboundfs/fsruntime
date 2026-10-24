@@ -18,13 +18,16 @@
   var ctx = canvas.getContext("2d");
   var frame = new Image();
   var pending = false;
-  var lastSerial = 0;
+  var surfaceWidth = 0;
+  var surfaceHeight = 0;
 
   function refresh() {
     if (pending) return;
     pending = true;
     var img = new Image();
     img.onload = function () {
+      surfaceWidth = img.naturalWidth;
+      surfaceHeight = img.naturalHeight;
       if (!canvas.width || !canvas.height) {
         canvas.width = img.naturalWidth;
         canvas.height = img.naturalHeight;
@@ -47,8 +50,9 @@
 
   canvas.addEventListener("mousedown", function (e) {
     var rect = canvas.getBoundingClientRect();
-    var x = (e.clientX - rect.left) / rect.width;
-    var y = (e.clientY - rect.top) / rect.height;
+    // Gauges receive pixel coordinates in their own render surface.
+    var x = Math.round(((e.clientX - rect.left) / rect.width) * (surfaceWidth || canvas.width));
+    var y = Math.round(((e.clientY - rect.top) / rect.height) * (surfaceHeight || canvas.height));
     var flag = e.button === 0 ? (1 << 29) : (e.button === 2 ? (1 << 31) : (1 << 30));
     var xhr = new XMLHttpRequest();
     xhr.open("GET", "/api?session=" + session + "&op=mouse&x=" + x + "&y=" + y + "&flags=" + flag, true);

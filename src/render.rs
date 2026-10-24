@@ -130,28 +130,28 @@ impl Renderer {
         id
     }
 
+    /// `data` is the whole texture (stride = texture width); `x,y,w,h` is the
+    /// dirty rect inside it. That is what nanovg hands to renderUpdateTexture.
     pub fn update_texture(&mut self, id: i32, x: i32, y: i32, w: i32, h: i32, data: &[u8]) -> bool {
         let Some(tex) = self.textures.get_mut(&id) else { return false };
         let bpp = if tex.alpha { 1 } else { 4 };
-        let mut offset = 0usize;
-        for row in 0..h {
+        let stride = tex.width as usize * bpp;
+        for row in 0..h.max(0) {
             let ty = y + row;
             if ty < 0 || ty >= tex.height as i32 {
-                offset += (w as usize) * bpp;
                 continue;
             }
-            for col in 0..w {
+            for col in 0..w.max(0) {
                 let tx = x + col;
                 if tx < 0 || tx >= tex.width as i32 {
-                    offset += bpp;
                     continue;
                 }
-                let dst = (ty as usize * tex.width as usize + tx as usize) * bpp;
-                let n = bpp.min(data.len().saturating_sub(offset));
-                if n > 0 && dst + n <= tex.data.len() {
-                    tex.data[dst..dst + n].copy_from_slice(&data[offset..offset + n]);
+                let src = ty as usize * stride + tx as usize * bpp;
+                if src + bpp > data.len() {
+                    continue;
                 }
-                offset += bpp;
+                let dst = ty as usize * stride + tx as usize * bpp;
+                tex.data[dst..dst + bpp].copy_from_slice(&data[src..src + bpp]);
             }
         }
         true

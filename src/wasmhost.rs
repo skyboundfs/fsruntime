@@ -864,9 +864,17 @@ fn dispatch(caller: &mut Caller<'_, HostState>, name: &str, params: &[Val], resu
             let w = i32_at(params, 4);
             let h = i32_at(params, 5);
             let data_ptr = i32_at(params, 6);
-            let alpha = caller.data().render.textures.get(&id).map(|t| t.alpha).unwrap_or(false);
+            // nanovg passes the whole texture here and the dirty rect
+            // separately, so read the full buffer rather than w*h.
+            let (alpha, width, height) = caller
+                .data()
+                .render
+                .textures
+                .get(&id)
+                .map(|t| (t.alpha, t.width, t.height))
+                .unwrap_or((false, 1, 1));
             let bpp = if alpha { 1 } else { 4 };
-            let bytes = read_bytes(caller, data_ptr, w * h * bpp);
+            let bytes = read_bytes(caller, data_ptr, (width * height * bpp) as i32);
             let ok = caller.data_mut().render.update_texture(id, x, y, w, h, &bytes);
             set_i32(results, if ok { 1 } else { 0 });
         }
