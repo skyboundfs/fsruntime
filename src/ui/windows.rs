@@ -110,7 +110,7 @@ fn open_window(
         "window.__MSFS_SESSION__ = {session}; window.__MSFS_BASE__ = {base:?};",
         base = base_url
     );
-    let inject = include_str!("web/inject.js");
+    let inject = include_str!("../web/inject.js");
     let builder = wry::WebViewBuilder::new()
         .with_url(url)
         .with_initialization_script(&init)

@@ -1,6 +1,6 @@
-use crate::fsrender::{FsPaint, FsPath, FsScissor, FsVertex};
-use crate::render::{Renderer, Scissor, Vertex};
-use crate::sim::{SimState, FS_VAR_ERROR_INVALID_ARGS, FS_VAR_ERROR_NONE};
+use crate::engine::fsrender::{FsPaint, FsPath, FsScissor, FsVertex};
+use crate::engine::render::{Renderer, Scissor, Vertex};
+use crate::engine::sim::{SimState, FS_VAR_ERROR_INVALID_ARGS, FS_VAR_ERROR_NONE};
 use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -271,7 +271,7 @@ impl GaugeInstance {
         (surface.width, surface.height, surface.pixels.clone())
     }
 
-    pub fn surface(&self) -> &crate::render::Surface {
+    pub fn surface(&self) -> &crate::engine::render::Surface {
         &self.store.data().render.surface
     }
 }

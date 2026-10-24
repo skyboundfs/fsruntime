@@ -4,7 +4,7 @@
 //! The runtime is owned by this thread; the instrument windows live on the
 //! tao/wry thread and are driven through `GuiSink`.
 
-use crate::gui::{GuiCommand, GuiSink};
+use crate::ui::windows::{GuiCommand, GuiSink};
 use crate::pkg::{Gauge, GaugeKind, Package};
 use crate::runtime::{Runtime, RuntimeRequest};
 use std::path::PathBuf;

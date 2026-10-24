@@ -1,8 +1,8 @@
 use crate::bridge::Bridge;
 use crate::pkg::{Gauge, GaugeKind, Package, Target};
-use crate::render::Surface;
-use crate::sim::SimState;
-use crate::wasmhost::{EngineConfig, GaugeInstance, HostEvent, ModuleReport, WasmHost};
+use crate::engine::render::Surface;
+use crate::engine::sim::SimState;
+use crate::engine::wasmhost::{EngineConfig, GaugeInstance, HostEvent, ModuleReport, WasmHost};
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -269,14 +269,14 @@ impl Runtime {
     }
 
     fn dispatch_commbus(&mut self, name: String, payload: Vec<u8>, broadcast: u32) {
-        if broadcast & crate::wasmhost::FS_COMMBUS_BROADCAST_WASM != 0 {
+        if broadcast & crate::engine::wasmhost::FS_COMMBUS_BROADCAST_WASM != 0 {
             for session in self.sessions.values_mut() {
                 if let Some(instance) = session.instance.as_mut() {
                     let _ = instance.deliver_commbus(&name, &payload);
                 }
             }
         }
-        if broadcast & crate::wasmhost::FS_COMMBUS_BROADCAST_JS != 0 {
+        if broadcast & crate::engine::wasmhost::FS_COMMBUS_BROADCAST_JS != 0 {
             // fsCommBusCall is given a buffer size, not a string length, so the
             // tail is uninitialised memory. JS callers JSON.parse the payload.
             let text = payload.split(|b| *b == 0).next().unwrap_or(&[]);
@@ -388,7 +388,7 @@ impl Runtime {
                 }
             }
             RuntimeRequest::Event { session, name } => {
-                let id = crate::keyevents::key_event_id(&name).unwrap_or(0);
+                let id = crate::engine::keyevents::key_event_id(&name).unwrap_or(0);
                 if let Some(s) = self.sessions.get_mut(&session) {
                     if let Some(instance) = s.instance.as_mut() {
                         let _ = instance.trigger_key(id);

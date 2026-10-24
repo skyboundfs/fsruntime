@@ -1,13 +1,8 @@
-mod app;
 mod bridge;
-mod fsrender;
-mod gui;
-mod keyevents;
+mod engine;
 mod pkg;
-mod render;
 mod runtime;
-mod sim;
-mod wasmhost;
+mod ui;
 
 use anyhow::Result;
 use std::path::PathBuf;
@@ -57,11 +52,11 @@ fn main() -> Result<()> {
     let window_thread = std::thread::Builder::new()
         .name("fsruntime-windows".into())
         .spawn(move || {
-            let (event_loop, sink) = gui::make_event_loop();
+            let (event_loop, sink) = ui::windows::make_event_loop();
             if sink_tx.send(sink.clone()).is_err() {
                 return;
             }
-            gui::run(event_loop, sink);
+            ui::windows::run(event_loop, sink);
         })?;
     let sink = sink_rx
         .recv()
@@ -72,7 +67,7 @@ fn main() -> Result<()> {
     sink.set_base_url(runtime.bridge.base_url());
     runtime.bridge.set_requests(request_tx.clone());
 
-    let result = app::run(runtime, request_tx, request_rx, sink, root, launch);
+    let result = ui::control::run(runtime, request_tx, request_rx, sink, root, launch);
     let _ = window_thread.join();
     result
 }
