@@ -81,10 +81,22 @@ pub fn run(event_loop: tao::event_loop::EventLoop<GuiEvent>, sink: GuiSink) {
 }
 
 pub fn make_event_loop() -> (tao::event_loop::EventLoop<GuiEvent>, GuiSink) {
-    use tao::platform::unix::EventLoopBuilderExtUnix;
     // eframe owns the main thread, so the instrument loop lives on a worker.
     let mut builder = EventLoopBuilder::<GuiEvent>::with_user_event();
-    builder.with_any_thread(true);
+    #[cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))]
+    {
+        use tao::platform::unix::EventLoopBuilderExtUnix;
+        builder.with_any_thread(true);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use tao::platform::windows::EventLoopBuilderExtWindows;
+        builder.with_any_thread(true);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // macOS EventLoop must run on the main thread; with_any_thread not available
+    }
     let event_loop = builder.build();
     let sink = GuiSink {
         proxy: event_loop.create_proxy(),
@@ -121,11 +133,26 @@ fn open_window(
                 eprintln!("[{session}] {}", &body[4..]);
             }
         });
-    use tao::platform::unix::WindowExtUnix;
-    use wry::WebViewBuilderExtUnix;
-    let vbox = window
-        .default_vbox()
-        .ok_or_else(|| anyhow::anyhow!("window has no default container"))?;
-    let webview = builder.build_gtk(vbox)?;
-    Ok(InstrumentWindow { window, webview, session })
+    #[cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))]
+    {
+        use tao::platform::unix::WindowExtUnix;
+        use wry::WebViewBuilderExtUnix;
+        let vbox = window
+            .default_vbox()
+            .ok_or_else(|| anyhow::anyhow!("window has no default container"))?;
+        let webview = builder.build_gtk(vbox)?;
+        Ok(InstrumentWindow { window, webview, session })
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use wry::WebViewBuilderExtWindows;
+        let webview = builder.build_as_child(&window)?;
+        Ok(InstrumentWindow { window, webview, session })
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use wry::WebViewBuilderExtMacOS;
+        let webview = builder.build_as_child(&window)?;
+        Ok(InstrumentWindow { window, webview, session })
+    }
 }
