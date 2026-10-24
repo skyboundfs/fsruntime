@@ -308,7 +308,7 @@ impl App {
                     for (i, (label, gauges)) in variants.iter().enumerate() {
                         ui.horizontal(|ui| {
                             if ui
-                                .selectable_label(self.variant == i, format!("{label}"))
+                                .selectable_label(self.variant == i, label)
                                 .on_hover_text(format!("{gauges} screens"))
                                 .clicked()
                             {
