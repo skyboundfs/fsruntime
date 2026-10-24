@@ -167,6 +167,11 @@ impl App {
     }
 
     fn show_window(&mut self, id: u64) {
+        // Instantiate the wasm module if not already done
+        if let Err(e) = self.runtime.instantiate_session(id) {
+            self.status = format!("failed to instantiate session {id}: {e}");
+            return;
+        }
         self.gui.send(GuiCommand::ShowWindow { session: id });
         self.window_visible.insert(id, true);
     }
@@ -188,7 +193,7 @@ impl App {
         };
         let package_name = package.name.clone();
         let title = gauge.title();
-        match self.runtime.start_gauge(&package_name, &title, gauge.clone()) {
+        match self.runtime.start_gauge(&package_name, &title, gauge.clone(), false) {
             Ok(id) => {
                 if self.open_window(id) {
                     self.instance = Some(id);

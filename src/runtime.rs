@@ -147,6 +147,7 @@ impl Runtime {
         package: &str,
         title: &str,
         gauge: Gauge,
+        lazy: bool,
     ) -> Result<u64> {
         let id = self.next_session;
         self.next_session += 1;
@@ -181,31 +182,33 @@ impl Runtime {
                     self.sessions.insert(id, session);
                     return Ok(id);
                 };
-                match self.host.instantiate(
-                    &path,
-                    name,
-                    context,
-                    gauge.width,
-                    gauge.height,
-                    params,
-                    self.events_tx.clone(),
-                ) {
-                    Ok(mut instance) => {
-                        let sim = instance.sim_handle();
-                        session.sim = sim;
-                        match instance.init() {
-                            Ok(code) => {
-                                self.log.push(format!("{title}: gauge_init -> {code}"));
+                if !lazy {
+                    match self.host.instantiate(
+                        &path,
+                        name,
+                        context,
+                        gauge.width,
+                        gauge.height,
+                        params,
+                        self.events_tx.clone(),
+                    ) {
+                        Ok(mut instance) => {
+                            let sim = instance.sim_handle();
+                            session.sim = sim;
+                            match instance.init() {
+                                Ok(code) => {
+                                    self.log.push(format!("{title}: gauge_init -> {code}"));
+                                }
+                                Err(e) => {
+                                    session.error = Some(e.to_string());
+                                }
                             }
-                            Err(e) => {
-                                session.error = Some(e.to_string());
-                            }
+                            session.unsupported = instance.unsupported.clone();
+                            session.instance = Some(instance);
                         }
-                        session.unsupported = instance.unsupported.clone();
-                        session.instance = Some(instance);
-                    }
-                    Err(e) => {
-                        session.error = Some(e.to_string());
+                        Err(e) => {
+                            session.error = Some(e.to_string());
+                        }
                     }
                 }
             }
@@ -219,6 +222,55 @@ impl Runtime {
         self.log.push(format!("session {id} {title}"));
         self.sessions.insert(id, session);
         Ok(id)
+    }
+
+    pub fn instantiate_session(&mut self, id: u64) -> Result<()> {
+        let session = self.sessions.get_mut(&id).ok_or_else(|| anyhow!("session {id} not found"))?;
+        if session.instance.is_some() {
+            return Ok(()); // already instantiated
+        }
+        if session.error.is_some() {
+            return Ok(()); // already failed
+        }
+        let GaugeKind::Wasm { gauge: name, params, module_path, .. } = &session.gauge.kind else {
+            return Ok(()); // not wasm
+        };
+        let Some(path) = module_path.clone() else {
+            session.error = Some(format!("wasm module not found for gauge {name}"));
+            return Ok(());
+        };
+        let title = session.title.clone();
+        let context = session.context;
+        let width = session.gauge.width;
+        let height = session.gauge.height;
+        match self.host.instantiate(
+            &path,
+            name,
+            context,
+            width,
+            height,
+            params,
+            self.events_tx.clone(),
+        ) {
+            Ok(mut instance) => {
+                let sim = instance.sim_handle();
+                session.sim = sim;
+                match instance.init() {
+                    Ok(code) => {
+                        self.log.push(format!("{title}: gauge_init -> {code}"));
+                    }
+                    Err(e) => {
+                        session.error = Some(e.to_string());
+                    }
+                }
+                session.unsupported = instance.unsupported.clone();
+                session.instance = Some(instance);
+            }
+            Err(e) => {
+                session.error = Some(e.to_string());
+            }
+        }
+        Ok(())
     }
 
     pub fn start_aircraft(&mut self, package: &str, aircraft: &str, variant: Option<&str>) -> Result<Vec<u64>> {
@@ -244,7 +296,7 @@ impl Runtime {
         let mut ids = Vec::new();
         for gauge in gauges {
             let title = format!("{} {}", key, gauge.title());
-            let id = self.start_gauge(package, &title, gauge)?;
+            let id = self.start_gauge(package, &title, gauge, true)?; // lazy=true for batch loading
             ids.push(id);
         }
         Ok(ids)
@@ -481,7 +533,7 @@ impl Runtime {
                     height: 768,
                     panel: path.clone(),
                 };
-                match self.start_gauge("__manual__", &title, synthetic) {
+                match self.start_gauge("__manual__", &title, synthetic, false) {
                     Ok(id) => RuntimeResponse::Value(id as f64),
                     Err(e) => RuntimeResponse::Error(e.to_string()),
                 }
