@@ -415,8 +415,12 @@ impl WasmHost {
         // These modules are WASI reactors: nothing runs their ctors, and
         // __wasilibc_populate_preopens lives there. Without this call every
         // fopen("./data/...") fails and gauge fonts never load.
+        // However, some modules (like BlueBird) have C++ static initializers
+        // that call unsupported APIs and trap - we catch that and continue.
         if let Ok(ctors) = instance.get_typed_func::<(), ()>(&mut store, "__wasm_call_ctors") {
-            ctors.call(&mut store, ()).map_err(|e| anyhow::anyhow!("__wasm_call_ctors trapped: {e}"))?;
+            if let Err(e) = ctors.call(&mut store, ()) {
+                eprintln!("warning: __wasm_call_ctors trapped (continuing anyway): {e}");
+            }
         }
         let callbacks = bind_callbacks(&mut store, &instance, label);
         Ok(GaugeInstance {
